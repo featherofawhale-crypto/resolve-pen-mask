@@ -1,0 +1,72 @@
+{ Tools = ordered() { QinghePenMask = GroupOperator {
+Inputs = ordered() {
+MainInput1 = InstanceInput { SourceOp = "MT_Input", Source = "Input", Name = "Input", Page = "Controls", },
+PreviewOriginal = InstanceInput { SourceOp = "MT_Preview", Source = "Mix", Name = "显示原片（绘制时开启）", Page = "Controls", },
+Path = InstanceInput { SourceOp = "MT_Pen", Source = "Polyline", Name = "钢笔路径", Page = "Controls", },
+Center = InstanceInput { SourceOp = "MT_Pen", Source = "Center", Name = "中心", Page = "Controls", },
+Size = InstanceInput { SourceOp = "MT_Pen", Source = "Size", Name = "缩放", Page = "Controls", },
+Feather = InstanceInput { SourceOp = "MT_Pen", Source = "SoftEdge", Name = "羽化", Page = "Controls", },
+Expansion = InstanceInput { SourceOp = "MT_Expand", Source = "MaskExpansion", Name = "扩展功能", Page = "Controls", },
+Invert = InstanceInput { SourceOp = "MT_Pen", Source = "Invert", Name = "反相", Page = "Controls", },
+Brightness = InstanceInput { SourceOp = "MT_Tint", Source = "Brightness", Name = "局部亮度", Page = "Controls", },
+PresetChoice = Input { Value = 0, },
+},
+UserControls = ordered() {
+ PresetChoice = { LINKS_Name = "形状预设", LINKID_DataType = "Number", ICS_ControlPage = "Controls", INPID_InputControl = "ComboControl", INP_Default = 0, INP_MinAllowed = 0, INP_MaxAllowed = 8, INP_MinScale = 0, INP_MaxScale = 8, INP_Integer = true, INP_Passive = true,
+  { CCS_AddString = "自由绘制" }, { CCS_AddString = "圆形" }, { CCS_AddString = "矩形" }, { CCS_AddString = "圆角矩形" }, { CCS_AddString = "三角形" }, { CCS_AddString = "菱形" }, { CCS_AddString = "五角星" }, { CCS_AddString = "五边形" }, { CCS_AddString = "六边形" }, },
+ ApplyPreset = { LINKS_Name = "应用所选预设", LINKID_DataType = "Number", ICS_ControlPage = "Controls", INPID_InputControl = "ButtonControl", INP_Default = 0, INP_External = false, BTNCS_Execute = "-- Called only by the fixed Inspector button on the clicked Pen Mask group.\nlocal root = assert(tool, '未找到当前蒙版实例')\nlocal choice = tonumber(root:GetInput('PresetChoice', comp.CurrentTime))\nif not choice or choice < 1 or choice > 8 or choice ~= math.floor(choice) then return end\n\nlocal children = assert(root:GetChildrenList(), '无法读取当前蒙版节点')\nlocal pen\nfor _, child in pairs(children) do\n  if child:GetAttrs().TOOLS_RegID == 'PolylineMask' then\n    assert(not pen, '蒙版实例包含多个钢笔节点')\n    pen = child\n  end\nend\nassert(pen and pen.Polyline:GetConnectedOutput(), '钢笔路径未连接')\nlocal curve = assert(pen.Polyline:GetConnectedOutput():GetTool(), '钢笔动画不存在')\nassert(curve:GetAttrs().TOOLS_RegID == 'BezierSpline', '钢笔动画类型已改变')\n\nlocal width = tonumber(comp:GetPrefs('Comp.FrameFormat.Width'))\nlocal height = tonumber(comp:GetPrefs('Comp.FrameFormat.Height'))\nassert(width and height and width > 0 and height > 0, '当前画幅无效')\nlocal aspect = width / height\nlocal radiusY = math.min(.24, .44 * aspect)\nlocal radiusX = radiusY / aspect\nlocal pi = math.pi\nlocal k = 4 * (math.sqrt(2) - 1) / 3\nlocal function point(x, y, lx, ly, rx, ry)\n  return {X=x, Y=y, LX=lx, LY=ly, RX=rx, RY=ry}\nend\nlocal function regular(count)\n  local points = {}\n  for i=0,count-1 do\n    local angle = pi/2 - i*2*pi/count\n    points[#points+1] = point(radiusX*math.cos(angle), radiusY*math.sin(angle))\n  end\n  return points\nend\nlocal shapes = {\n  function() return {\n    point(0,radiusY,-k*radiusX,0,k*radiusX,0),\n    point(radiusX,0,0,k*radiusY,0,-k*radiusY),\n    point(0,-radiusY,k*radiusX,0,-k*radiusX,0),\n    point(-radiusX,0,0,-k*radiusY,0,k*radiusY),\n  } end,\n  function() return {point(-.28,.22),point(.28,.22),point(.28,-.22),point(-.28,-.22)} end,\n  function()\n    local hx,hy,ry=.28,.22,.065\n    local rx=ry/aspect\n    return {\n      point(-hx+rx,hy,-k*rx,0,0,0), point(hx-rx,hy,0,0,k*rx,0),\n      point(hx,hy-ry,0,k*ry,0,0), point(hx,-hy+ry,0,0,0,-k*ry),\n      point(hx-rx,-hy,k*rx,0,0,0), point(-hx+rx,-hy,0,0,-k*rx,0),\n      point(-hx,-hy+ry,0,-k*ry,0,0), point(-hx,hy-ry,0,0,0,k*ry),\n    }\n  end,\n  function() return regular(3) end,\n  function() return {point(0,radiusY),point(radiusX,0),point(0,-radiusY),point(-radiusX,0)} end,\n  function()\n    local points={}\n    for i=0,9 do\n      local angle=pi/2-i*pi/5\n      local scale=i%2==0 and 1 or .44\n      points[#points+1]=point(scale*radiusX*math.cos(angle),scale*radiusY*math.sin(angle))\n    end\n    return points\n  end,\n  function() return regular(5) end,\n  function() return regular(6) end,\n}\nlocal labels={'圆形','矩形','圆角矩形','三角形','菱形','五角星','五边形','六边形'}\nlocal points=shapes[choice]()\n\n-- Only numeric geometry produced above is parsed; no user text becomes Lua code.\nlocal function num(value)\n  assert(type(value)=='number' and value==value and math.abs(value)<2, '预设坐标无效')\n  return string.format('%.9f', value):gsub(',', '.')\nend\nlocal vertices={}\nfor _, p in ipairs(points) do\n  local fields={'X='..num(p.X),'Y='..num(p.Y)}\n  if p.LX then\n    for _, key in ipairs({'LX','LY','RX','RY'}) do fields[#fields+1]=key..'='..num(p[key]) end\n  else fields[#fields+1]='Linear=true' end\n  vertices[#vertices+1]='{'..table.concat(fields,',')..'}'\nend\nlocal data='{Tools={PresetShape=BezierSpline{KeyFrames={[0]={0,Value=Polyline{Closed=true,Points={'..table.concat(vertices,',')..'}}}}}}}'\nlocal parsed=assert(bmd.readstring(data), '无法生成原生钢笔路径')\nlocal shape=assert(parsed.Tools.PresetShape.KeyFrames[0].Value, '预设路径无效')\nassert(shape.Points and #shape.Points==#points, '预设顶点构造失败')\n\nlocal name=curve:GetAttrs().TOOLS_Name\nlocal before=assert(curve:SaveSettings(), '无法保存原始动画')\nlocal draft=assert(curve:SaveSettings(), '无法复制原始动画')\nlocal saved=assert(draft.Tools and draft.Tools[name], '动画节点设置无效')\nlocal keys=assert(saved.KeyFrames, '动画关键帧不存在')\nlocal frame=math.floor(tonumber(comp.CurrentTime) or 0)\nlocal count, blankFrame = 0, nil\nfor key, value in pairs(keys) do\n  count=count+1\n  if not value.Value or not value.Value.Points or not next(value.Value.Points) then blankFrame=key end\nend\nif count==1 and blankFrame then frame=blankFrame end\nlocal oldPreview=root:GetInput('PreviewOriginal', comp.CurrentTime)\n\ncomp:StartUndo('钢笔蒙版：'..labels[choice]..'预设')\nlocal ok,err=pcall(function()\n  local key=keys[frame] or {frame, Flags={Linear=true,LockedY=true}}\n  key.Value=shape\n  keys[frame]=key\n  assert(curve:LoadSettings(draft), '原生钢笔动画拒绝写入')\n  root:SetInput('PreviewOriginal', 0)\nend)\nif not ok then\n  pcall(function() curve:LoadSettings(before); root:SetInput('PreviewOriginal', oldPreview) end)\n  print('钢笔蒙版预设失败：'..tostring(err))\nend\ncomp:EndUndo(ok)\n", },
+},
+Outputs = { MainOutput1 = InstanceOutput { SourceOp = "MT_Preview", Source = "Output", }, },
+ViewInfo = GroupInfo { Pos = { 0, 0 } },
+Tools = ordered() {
+MT_Input = PipeRouter { Inputs = { }, },
+MT_Pen = PolylineMask {
+ DrawMode = "ClickAppend", DrawMode2 = "InsertAndModify",
+ Inputs = {
+  UseFrameFormatSettings = Input { Value = 1, },
+  Polyline = Input { SourceOp = "MT_Path", Source = "Value", },
+  Polyline2 = Input { Value = Polyline { }, Disabled = true, },
+ },
+},
+MT_Path = BezierSpline { KeyFrames = {
+ [0] = { 0, Flags = { Linear = true, LockedY = true }, Value = Polyline { } },
+}, },
+MT_Expand = ErodeDilate { Inputs = {
+ Input = Input { SourceOp = "MT_Pen", Source = "Mask", },
+ MaskExpansion = Input { Value = 0, },
+ LockXY = Input { Value = 0, },
+ XAmount = Input { Expression = "-self.MaskExpansion / comp:GetPrefs(\"Comp.FrameFormat.Width\")", },
+ YAmount = Input { Expression = "-self.MaskExpansion / comp:GetPrefs(\"Comp.FrameFormat.Height\")", },
+}, UserControls = ordered() { MaskExpansion = {
+ LINKS_Name = "扩展功能", LINKID_DataType = "Number",
+ INPID_InputControl = "SliderControl", INP_Default = 0,
+ INP_MinAllowed = -200, INP_MaxAllowed = 200,
+ INP_MinScale = -200, INP_MaxScale = 200,
+}, }, },
+MT_Tint = BrightnessContrast { Inputs = {
+ Input = Input { SourceOp = "MT_Input", Source = "Output", },
+ Brightness = Input { Value = 0, }, Alpha = Input { Value = 0, },
+}, },
+MT_Transparent = Background { Inputs = {
+ UseFrameFormatSettings = Input { Value = 1, },
+ TopLeftAlpha = Input { Value = 0, },
+}, },
+MT_Cutout = Merge { Inputs = {
+ Background = Input { SourceOp = "MT_Transparent", Source = "Output", },
+ Foreground = Input { SourceOp = "MT_Tint", Source = "Output", },
+ EffectMask = Input { SourceOp = "MT_Expand", Source = "Output", },
+ PerformDepthMerge = Input { Value = 0, },
+}, },
+MT_Preview = Dissolve { Inputs = {
+ Background = Input { SourceOp = "MT_Cutout", Source = "Output", },
+ Foreground = Input { SourceOp = "MT_Input", Source = "Output", },
+ Mix = Input { Value = 1, },
+}, UserControls = ordered() { Mix = {
+ LINKS_Name = "显示原片（绘制时开启）", LINKID_DataType = "Number",
+ INPID_InputControl = "CheckboxControl", INP_Default = 1, INP_Integer = true,
+}, }, }
+},
+},
+},
+ActiveTool = "QinghePenMask",
+}
